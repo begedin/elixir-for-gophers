@@ -1,0 +1,1000 @@
+# Elixir for Gophers: Same Problems, Different Solutions
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.19"},
+  {:makeup_syntect, "~> 0.1"},
+  {:ecto_sqlite3, "~> 0.25"}
+])
+
+defmodule Slides do
+  @moduledoc """
+  Helpers for the slides.
+  """
+
+  @root __DIR__
+
+  @doc """
+  Shows a Go source file with syntax highlighting. The path is relative
+  to the repository root.
+
+  Livebook does not highlight Go code blocks, so this function
+  highlights the source with Makeup and shows it as HTML.
+
+  ## Options
+
+    * `:from` - show the source from the first line that starts with
+      this text. Use it to hide the package clause and the imports.
+  """
+  def go_source(path, opts \\ []) do
+    {lexer, lexer_opts} = Makeup.Registry.fetch_lexer_by_name!("go")
+
+    source =
+      @root
+      |> Path.join(path)
+      |> File.read!()
+      |> drop_header(opts[:from])
+
+    html = Makeup.highlight(source, lexer: lexer, lexer_options: lexer_opts)
+    css = Makeup.stylesheet(Makeup.Styles.HTML.StyleMap.one_dark_style())
+
+    Kino.HTML.new("""
+    <style>
+      #{css}
+      body { margin: 0; }
+      .highlight {
+        margin: 0;
+        padding: 16px;
+        border-radius: 8px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        tab-size: 4;
+        overflow-x: auto;
+      }
+    </style>
+    #{html}
+    """)
+  end
+
+  @doc """
+  Builds the Go program in `go/<name>` and runs it once.
+  Shows the output and the exit status.
+
+  ## Options
+
+    * `:race` - build the program with the race detector (`-race`)
+  """
+  def go_run(name, opts \\ []) do
+    {output, status} = System.cmd(go_build(name, opts), [], stderr_to_stdout: true)
+    Kino.Text.new(output <> "\nexit status #{status}", terminal: true)
+  end
+
+  @doc """
+  Builds the Go program in `go/<name>` and returns the path of the binary.
+  Takes the same options as `go_run/2`.
+  """
+  def go_build(name, opts \\ []) do
+    go = System.find_executable("go") || raise "go is not in PATH"
+    race = Keyword.get(opts, :race, false)
+    bin = Path.join(System.tmp_dir!(), "elixir_for_gophers_#{name}#{if race, do: "_race"}")
+    flags = if race, do: ["-race"], else: []
+    args = ["build", "-trimpath"] ++ flags ++ ["-o", bin, "./go/#{name}"]
+
+    case System.cmd(go, args, cd: @root, stderr_to_stdout: true) do
+      {_output, 0} -> bin
+      {output, _status} -> raise "go build failed:\n#{output}"
+    end
+  end
+
+  # Without `from`, removes only the `//go:build` line of a snippet.
+  defp drop_header(source, nil), do: String.replace(source, ~r/\A\/\/go:build[^\n]*\n+/, "")
+
+  defp drop_header(source, from) do
+    [_header, rest] = String.split(source, "\n" <> from, parts: 2)
+    from <> rest
+  end
+end
+```
+
+## Elixir for Gophers
+
+### Same problems, different solutions
+
+Nikola Begedin · V7
+
+## Same problems, different solutions
+
+1. The language: pattern matching, function clauses, pipes
+2. The runtime: processes, failures, state, clusters
+3. A web project: the layout and the database
+4. Types, project shapes and the right tool
+5. A real Elixir codebase, and how to keep it in shape
+
+## Where we meet
+
+* **Go:** *Go Developer Survey 2025* 74% build CLIs, 73% build API services, 46% build websites and 38% build cloud infrastructure tools.
+* **Elixir:** *2025 Elixir community survey* 97% use Phoenix (web + API), 86% use LiveView
+* **Where we meet?** Web API.
+
+#### Tooling similarities
+
+| Go                     | Elixir                              |
+| ---------------------- | ----------------------------------- |
+| `go fmt`               | `mix format`                        |
+| `go test`              | `mix test` (ExUnit)                 |
+| `go doc`               | `h/1` in IEx, ExDoc                 |
+| `go mod`               | Mix and Hex                         |
+| `if err != nil`        | `{:ok, value}` / `{:error, reason}` |
+| structs and interfaces | structs, protocols and behaviours   |
+
+Small languages. No classes. No inheritance.
+
+## Pattern matching
+
+**Go:** `=` assigns a value. A `switch` or a type switch selects a branch.
+
+**Elixir:** `=` is a match. The left side is a pattern, and the match binds the variables in it.
+
+```elixir
+response = {:ok, %{name: "Ana", langs: ["Go", "Elixir"]}}
+
+{:ok, %{name: name, langs: [first | _rest]}} = response
+{name, first}
+```
+
+**Elixir:** `case` runs the first branch whose pattern matches. Many functions return `{:ok, value}` or an error, and one `case` handles both.
+
+```elixir
+users = %{1 => "Ana"}
+
+for id <- [1, 2] do
+  case Map.fetch(users, id) do
+    {:ok, name} -> "user #{id}: #{name}"
+    :error -> "user #{id}: not found"
+  end
+end
+```
+
+* A value that does not match any pattern raises `MatchError`. In a process, that is a crash. "Let it crash, with a supervisor" shows what happens next.
+* `receive`, `with` and function clauses use the same patterns.
+
+## Function clauses and pipes
+
+**Go:** one function with a `switch` inside.
+
+**Elixir:** one function with many clauses (function heads). The first clause whose pattern and guard (`when`) match is the one that runs.
+
+```elixir
+defmodule Status do
+  def text(200), do: "OK"
+  def text(404), do: "Not Found"
+  def text(code) when code in 500..599, do: "Server Error"
+  def text(_code), do: "Unknown"
+end
+
+for code <- [200, 404, 503, 302], do: {code, Status.text(code)}
+```
+
+**Go:** `strings.Fields(strings.ToUpper(strings.TrimSpace(title)))`. You read it from the inside out.
+
+**Elixir:** `x |> f(y)` is `f(x, y)`. You read the steps from top to bottom.
+
+```elixir
+title = "  elixir for gophers  "
+
+words =
+  title
+  |> String.trim()
+  |> String.upcase()
+  |> String.split()
+
+{title, words}
+```
+
+## processes vs goroutines
+
+Neither are 1-1 mapping to OS thread or process.
+
+### Go
+
+* Goroutines have no address. You talk to a goroutine through a channel that you both have.
+* Goroutines share one heap. "Share memory by communicating" is a Go proverb, but a mutex is also normal Go. The race detector finds access with no lock.
+* **Myth:** "Go scheduling is cooperative." Since Go 1.14, the runtime also stops a goroutine in a tight loop, after about 10 ms. The BEAM switches after a fixed amount of work. Go switches after a time.
+
+### Elixir
+
+* each BEAM process has a PID, a mailbox, its own heap and its own garbage collection.
+* Messages are copied. A process cannot change the memory of another process.
+* **Myth:** elixir processes are insanely cheap
+  * Yes compared to an OS thread, but close in cost to goroutine
+  * Both cost about 2.6 KB.
+  * The difference is isolation, not size.
+
+## processes vs goroutines
+
+**Go:** start 100,000 goroutines that wait on a channel.
+
+```elixir
+Slides.go_source("go/goroutines/main.go", from: "const count")
+```
+
+```elixir
+Slides.go_run("goroutines")
+```
+
+**Elixir:** start 100,000 processes that wait for a message.
+
+```elixir
+defmodule Spawner do
+  def start(count) do
+    for _ <- 1..count do
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+    end
+  end
+end
+
+before = :erlang.memory(:processes)
+{microseconds, pids} = :timer.tc(fn -> Spawner.start(100_000) end)
+used = :erlang.memory(:processes) - before
+Enum.each(pids, &send(&1, :stop))
+
+Kino.Text.new(
+  """
+  processes: 100000
+  time: #{div(microseconds, 1000)} ms
+  bytes per process: #{div(used, 100_000)}
+  """,
+  terminal: true
+)
+```
+
+**Go:** a goroutine has no address. You talk to a channel.
+
+```elixir
+Slides.go_source("go/channels/main.go", from: "func main")
+```
+
+```elixir
+Slides.go_run("channels")
+```
+
+**Elixir:** a process has an address. You send a message to its PID.
+
+```elixir
+pong =
+  spawn(fn ->
+    Process.set_label(:pong)
+
+    receive do
+      {:ping, from} -> send(from, :pong)
+    end
+
+    receive do
+      :stop -> :ok
+    end
+  end)
+
+{:ok, diagram} =
+  Kino.Process.seq_trace(fn ->
+    send(pong, {:ping, self()})
+
+    receive do
+      :pong -> :ok
+    end
+  end)
+
+send(pong, :stop)
+diagram
+```
+
+> **Verdict:** both runtimes start 100,000 tasks in milliseconds. A PID can get messages from any process, also on another node.
+
+## Fan out with a limit
+
+Check 100 links, 10 at a time. One link in ten hangs. Stop the wait after 500 ms.
+
+**Go:** a semaphore channel limits the checks. `context.WithTimeout` stops the wait.
+
+```elixir
+Slides.go_source("go/fanout/main.go", from: "func main")
+```
+
+```elixir
+Slides.go_run("fanout")
+```
+
+**Elixir:** `Task.async_stream/3` limits the tasks and stops a slow task.
+
+```elixir
+check = fn link ->
+  if rem(link, 10) == 0, do: Process.sleep(:infinity)
+  Process.sleep(:rand.uniform(200))
+end
+
+{microseconds, results} =
+  :timer.tc(fn ->
+    0..99
+    |> Task.async_stream(check, max_concurrency: 10, timeout: 500, on_timeout: :kill_task)
+    |> Enum.frequencies_by(fn
+      {:ok, _} -> :ok
+      {:exit, :timeout} -> :timeout
+    end)
+  end)
+
+Map.put(results, :ms, div(microseconds, 1000))
+```
+
+* **Go:** `check` must watch `ctx.Done()`. A check that ignores `ctx` continues after the timeout.
+* **Elixir:** `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow.
+
+> **Verdict:** the code size is similar. Go needs help from every function. Elixir stops the work from outside.
+
+## Cancellation without context
+
+**Go:** `work` never checks `ctx`, so `cancel()` does not stop it.
+
+```elixir
+Slides.go_source("go/cancel/main.go", from: "func main")
+```
+
+```elixir
+Slides.go_run("cancel")
+```
+
+**Elixir:** the cell stops the task from outside.
+
+```elixir
+task =
+  Task.async(fn ->
+    for step <- Stream.iterate(1, &(&1 + 1)) do
+      IO.puts("work: step #{step}")
+      Process.sleep(100)
+    end
+  end)
+
+Process.sleep(250)
+Task.shutdown(task, :brutal_kill)
+IO.puts("cell: shutdown")
+
+Process.sleep(250)
+IO.puts("cell: work alive? #{Process.alive?(task.pid)}")
+```
+
+* **Go:** you give `ctx` to every function. A function that ignores `ctx` continues after `cancel()`. Go 1.27 adds a goroutine leak profile to find these goroutines.
+* **Elixir:** there is no `ctx` argument. `Task.shutdown/2` or `Process.exit/2` stops a process, wherever its code is.
+* Links send the stop to the child processes too.
+
+> **Verdict:** Elixir can stop any work from outside. Go makes cancellation explicit and visible in each signature.
+
+## Errors: same idea, different crash
+
+Expected errors are values in both languages.
+
+**Go:** each step checks and wraps the error.
+
+```elixir
+Slides.go_source("go/snippets/errors.go", from: "// Expected errors")
+```
+
+**Elixir:** the same idea with `with`.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def load_user(id) do
+  with {:ok, row} <- Db.query_user(id),
+       {:ok, user} <- parse_user(row) do
+    {:ok, user}
+  end
+end
+```
+
+Unexpected errors are different.
+
+**Go:** a panic in one goroutine stops the whole program.
+
+```elixir
+Slides.go_source("go/crash/main.go", from: "func main")
+```
+
+```elixir
+Slides.go_run("crash")
+```
+
+**Elixir:** a crash stops one process. A monitor tells you why.
+
+```elixir
+for id <- 1..3 do
+  spawn_monitor(fn ->
+    Process.sleep(id * 100)
+    if id == 2, do: raise("boom")
+    IO.puts("worker #{id} done")
+  end)
+end
+
+reasons =
+  for _ <- 1..3 do
+    receive do
+      {:DOWN, _ref, :process, _pid, :normal} -> :normal
+      {:DOWN, _ref, :process, _pid, {error, _stack}} -> {:crashed, Exception.message(error)}
+    end
+  end
+
+IO.puts("cell: still running")
+reasons
+```
+
+**Caveat:** `net/http` recovers a panic in a handler. A panic in a goroutine that the handler starts still stops the server.
+
+> **Verdict:** for expected errors, the two languages agree. For unexpected errors, Elixir stops one process and Go stops the program.
+
+## Let it crash, with a supervisor
+
+* A supervisor starts child processes and restarts them when they crash.
+* Strategies:
+  * `:one_for_one` restarts only the crashed child. Use it when the children are independent.
+  * `:rest_for_one` restarts the crashed child and all children that started after it. Use it when later children depend on earlier ones.
+  * `:one_for_all` restarts all children. Use it when the children work only as a group.
+* Too many crashes in a short time: the supervisor stops too, and its own supervisor decides.
+* **Go:** a `recover` loop around each goroutine, or Kubernetes restarts the whole program.
+
+**Elixir:** a supervisor with three workers.
+
+```elixir
+defmodule Worker do
+  use GenServer
+
+  def start_link(id), do: GenServer.start_link(__MODULE__, id)
+
+  @impl true
+  def init(id), do: {:ok, %{id: id, started_at: Time.utc_now()}}
+end
+
+defmodule Workers do
+  use Supervisor
+
+  def start_link(_), do: Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
+
+  @impl true
+  def init(:ok) do
+    children = for id <- 1..3, do: Supervisor.child_spec({Worker, id}, id: id)
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+end
+
+Kino.start_child(Workers)
+Kino.Process.sup_tree(Workers)
+```
+
+Kill worker 2. The supervisor starts a new worker 2 with a new PID.
+
+```elixir
+{2, pid, :worker, _} = List.keyfind(Supervisor.which_children(Workers), 2, 0)
+Process.exit(pid, :kill)
+Process.sleep(100)
+
+Kino.Layout.grid([
+  Kino.Text.new("killed #{inspect(pid)}"),
+  Kino.Process.sup_tree(Workers)
+])
+```
+
+> **Verdict:** Elixir restarts small parts of a program. Go usually restarts the whole program, with help from the platform.
+
+## State without locks
+
+100 callers increment a counter at the same time, 1,000 times each.
+
+**Go:** shared memory. One counter has a mutex, the other counter has no lock.
+
+```elixir
+Slides.go_source("go/counter/main.go", from: "// Counter is safe")
+```
+
+```elixir
+Slides.go_run("counter")
+```
+
+**Go:** the same program, built with `-race`. The race detector finds the missing lock.
+
+```elixir
+Slides.go_run("counter", race: true)
+```
+
+**Elixir:** the state is inside one process.
+
+```elixir
+defmodule Counter do
+  use GenServer
+
+  def start_link(_), do: GenServer.start_link(__MODULE__, 0, name: __MODULE__)
+  def increment, do: GenServer.call(__MODULE__, :increment)
+  def value, do: GenServer.call(__MODULE__, :value)
+
+  @impl true
+  def init(n), do: {:ok, n}
+
+  @impl true
+  def handle_call(:increment, _from, n), do: {:reply, :ok, n + 1}
+  def handle_call(:value, _from, n), do: {:reply, n, n}
+end
+
+Kino.start_child(Counter)
+
+1..100
+|> Task.async_stream(fn _ -> for _ <- 1..1_000, do: Counter.increment() end, max_concurrency: 100)
+|> Stream.run()
+
+Counter.value()
+```
+
+* **Go:** without the mutex, increments get lost. `-race` finds the missing lock, but only when the race occurs during the run.
+* **Elixir:** the process handles one message at a time, so it needs no lock.
+* For many concurrent readers, use ETS: an in-memory table with concurrent reads.
+
+> **Verdict:** a Go mutex is faster for hot shared memory. Elixir has no data races, but logic races are still possible.
+
+## Many nodes, one system
+
+* Distributed Erlang connects BEAM nodes. `send/2` works the same for a PID on another node.
+* Phoenix.PubSub, Channels and LiveView use this to send events to every node in a cluster.
+* **Go:** gRPC, NATS or Redis between services, plus service discovery.
+* **Caveat:** the nodes trust each other fully (one shared cookie). Use it only in a private network.
+
+Start two more nodes on this laptop.
+
+```elixir
+start_node = fn prefix ->
+  {:ok, peer, node} =
+    :peer.start_link(%{
+      # A unique name, so the cell can run again while old nodes still run
+      name: :peer.random_name(prefix),
+      host: ~c"127.0.0.1",
+      longnames: true,
+      connection: :standard_io,
+      exec: String.to_charlist(Path.join(:code.root_dir(), "bin/erl")),
+      args: [~c"-setcookie", Atom.to_charlist(Node.get_cookie())]
+    })
+
+  :ok = :peer.call(peer, :code, :add_paths, [:code.get_path()])
+  true = Node.connect(node)
+  {peer, node}
+end
+
+{alpha_peer, alpha} = start_node.(:alpha)
+{beta_peer, beta} = start_node.(:beta)
+[alpha, beta]
+```
+
+Start a process on `beta` and send a message to it.
+
+```elixir
+pid =
+  Node.spawn(beta, fn ->
+    receive do
+      {:hello, from} -> send(from, {:hello_back, node()})
+    end
+  end)
+
+send(pid, {:hello, self()})
+
+receive do
+  reply -> reply
+after
+  1_000 -> :timeout
+end
+```
+
+Connect `alpha` to `beta`, then stop both nodes.
+
+```elixir
+true = :erpc.call(alpha, Node, :connect, [beta])
+nodes_seen_by_alpha = :erpc.call(alpha, Node, :list, [])
+
+:peer.stop(alpha_peer)
+:peer.stop(beta_peer)
+nodes_seen_by_alpha
+```
+
+> **Verdict:** Elixir has clustering built in, for one trusted system. Go with gRPC is better across languages and trust boundaries.
+
+## Look inside a running system
+
+* In production, `bin/my_app remote` opens an IEx shell inside the running release.
+* Phoenix LiveDashboard and Oban Web show the same data in a browser.
+* You can read the state of any process and trace its messages, with no restart.
+* **Go:** pprof, `runtime/trace` with the flight recorder (Go 1.25), the goroutine leak profile (Go 1.27).
+
+Read the state of worker 1 from the supervisor slide.
+
+```elixir
+{1, pid, _, _} = List.keyfind(Supervisor.which_children(Workers), 1, 0)
+
+%{
+  state: :sys.get_state(pid),
+  info: Process.info(pid, [:memory, :message_queue_len, :reductions]),
+  processes_on_this_node: length(Process.list())
+}
+```
+
+> **Verdict:** Go has excellent profilers for CPU and memory. Elixir lets you look inside a live system and change it.
+
+## A web project: Gin and Phoenix
+
+* **Go:** Gin is the most used Go web framework (48%). Many teams use only the standard library `net/http` (32%). *JetBrains, Go ecosystem surveys 2025*
+* **Elixir:** `mix phx.new my_app` generates a Phoenix project.
+
+|                | Go with Gin (a common layout)    | Phoenix 1.8                               |
+| -------------- | -------------------------------- | ----------------------------------------- |
+| Start          | `cmd/api/main.go`                | `lib/my_app/application.ex`, a supervisor |
+| Routes         | `r.GET("/users/:id", h.GetUser)` | `get "/users/:id", UserController, :show` |
+| Handlers       | `internal/handler/`              | `lib/my_app_web/controllers/`             |
+| Business logic | `internal/service/`              | `lib/my_app/accounts.ex`, a context       |
+| Database       | `internal/store/` with sqlc      | `lib/my_app/repo.ex` and Ecto schemas     |
+
+* **Go:** the Go team documents only `cmd/` and `internal/`. Each team selects the rest.
+* **Elixir:** `my_app` holds the business logic, and `my_app_web` holds the HTTP code. The generators add code in the same places.
+
+> **Verdict:** Go lets each team select its layout. Phoenix gives all projects the same layout, so a new developer knows where to look.
+
+## Talking to the database
+
+**Go:**
+
+* `database/sql` has a connection pool built in. pgx is the usual Postgres driver.
+* sqlc generates typed Go code from SQL. GORM is the popular ORM. sqlx scans rows into structs.
+* Migrations: goose, golang-migrate or Atlas.
+
+```elixir
+Slides.go_source("go/snippets/sqlc.go", from: "// sqlc reads")
+```
+
+**Elixir:**
+
+* Ecto has four parts: Repo, Schema, Changeset and Query. Postgrex is the driver. DBConnection is the pool.
+* Ecto is not an ORM. A schema is a struct, not an object. There is no lazy loading: you preload associations.
+* Migrations are part of Ecto (`mix ecto.migrate`).
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def list_active_users(since) do
+  from(u in User,
+    where: u.active and u.inserted_at > ^since,
+    order_by: u.name,
+    select: [:id, :name, :email]
+  )
+  |> Repo.all()
+end
+```
+
+> **Verdict:** sqlc checks your SQL when you generate the code. Ecto queries compose, and validation errors are data.
+
+## Ecto in action
+
+A schema, a changeset and a SQLite database in a temporary file.
+
+```elixir
+defmodule Demo.Repo do
+  use Ecto.Repo, otp_app: :demo, adapter: Ecto.Adapters.SQLite3
+end
+
+defmodule Demo.User do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "users" do
+    field :name, :string
+    field :email, :string
+    field :active, :boolean, default: true
+    timestamps()
+  end
+
+  def changeset(user, attrs) do
+    user
+    |> cast(attrs, [:name, :email, :active])
+    |> validate_required([:name, :email])
+    |> validate_format(:email, ~r/@/)
+  end
+end
+
+database = Path.join(System.tmp_dir!(), "elixir_for_gophers.db")
+File.rm(database)
+Kino.start_child({Demo.Repo, database: database, pool_size: 1, log: false})
+
+Demo.Repo.query!("""
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  name TEXT, email TEXT, active BOOLEAN,
+  inserted_at TEXT, updated_at TEXT
+)
+""")
+```
+
+Validation errors are data, not exceptions.
+
+```elixir
+alias Demo.{Repo, User}
+
+{:error, changeset} =
+  %User{}
+  |> User.changeset(%{name: "Ana", email: "not an email"})
+  |> Repo.insert()
+
+changeset.errors
+```
+
+Queries compose. Each step adds to the query.
+
+```elixir
+import Ecto.Query
+
+Repo.delete_all(User)
+
+for {name, email, active} <- [
+      {"Ana", "ana@example.com", true},
+      {"Bo", "bo@example.com", false},
+      {"Cy", "cy@example.org", true},
+      {"Di", "di@example.com", true}
+    ] do
+  %User{} |> User.changeset(%{name: name, email: email, active: active}) |> Repo.insert!()
+end
+
+active = from(u in User, where: u.active)
+query = active |> where([u], like(u.email, "%@example.com")) |> select([u], u.name)
+
+{sql, _params} = Repo.to_sql(:all, query)
+%{sql: sql, names: Repo.all(query)}
+```
+
+A transaction is all or nothing. The second insert fails, so the first insert does not stay.
+
+```elixir
+{:error, failed_step, changeset, _changes_so_far} =
+  Ecto.Multi.new()
+  |> Ecto.Multi.insert(:eve, User.changeset(%User{}, %{name: "Eve", email: "eve@example.com"}))
+  |> Ecto.Multi.insert(:mal, User.changeset(%User{}, %{name: "Mal", email: "no email"}))
+  |> Repo.transact()
+
+%{failed_step: failed_step, errors: changeset.errors, users_in_db: Repo.aggregate(User, :count)}
+```
+
+* Oban puts a job in the same `Ecto.Multi`, so the job exists only if the transaction commits. River (Go) does the same with `InsertTx`.
+* The SQL Sandbox gives each test its own transaction, so tests that use Postgres can run with `async: true`.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+Ecto.Multi.new()
+|> Ecto.Multi.insert(:user, User.changeset(%User{}, attrs))
+|> Oban.insert(:welcome, fn %{user: user} -> WelcomeEmail.new(%{user_id: user.id}) end)
+|> Repo.transact()
+```
+
+## Go types and Elixir types
+
+| Go                  | Elixir                                                              |
+| ------------------- | ------------------------------------------------------------------- |
+| `int64`, `float64`  | integer with no size limit, float                                   |
+| `string`            | string: a UTF-8 binary                                              |
+| `[]T`               | list (a linked list), or tuple (fixed size)                         |
+| `map[K]V`           | map, with keys and values of any type                               |
+| `struct`            | struct: a map with fixed keys                                       |
+| `const` with `iota` | atoms: `:active`, `:banned`                                         |
+| `error`, `nil`      | `{:error, reason}`. `nil` is an atom                                |
+| pointers            | none: all data is immutable                                         |
+| interfaces          | protocols (for data) and behaviours (for modules, like `GenServer`) |
+
+* **Go:** a variable has a type. The compiler checks every assignment and every call.
+* **Elixir:** a value has a type, but a variable does not. The same variable can hold an integer or a string.
+* An integer does not overflow. `2 ** 100` gives the exact value.
+
+## Type checking
+
+* **Go:** static types and generics (generic methods since Go 1.27). The compiler rejects a program with a type error.
+* **Elixir:** gradual types. The compiler infers types from patterns and guards, with no annotations.
+
+**Elixir 1.20:** the compiler finds the type error in this module.
+
+```elixir
+defmodule Shapes do
+  def area({:square, side}), do: side * side
+  def area({:circle, radius}), do: 3.14 * radius * radius
+
+  def describe(shape), do: "Area: " <> area(shape)
+end
+```
+
+## Typespecs and Dialyzer
+
+* **Go:** the types are part of the code, and the compiler checks them. Go needs no second tool.
+* **Elixir:** `@type` and `@spec` describe the types of a function. They are optional.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+@type shape :: {:square, number()} | {:circle, number()}
+
+@spec area(shape()) :: number()
+def area({:square, side}), do: side * side
+```
+
+* Dialyzer (`mix dialyzer` with the dialyxir package) reads the typespecs. It reports only code that can never work, so it misses many bugs.
+* On a large project, Dialyzer is slow, and its messages are hard to read.
+* The Elixir 1.20 compiler does not read `@spec`. It infers its own types.
+
+> **Verdict:** Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
+
+## Project shapes and the right tool
+
+```mermaid
+flowchart TB
+  subgraph Go["Typical Go backend: many services, Kubernetes keeps them up"]
+    direction LR
+    LB[Load balancer] --> API[API service] --> Q[[Queue]] --> W[Worker service]
+    API --> R[(Redis)]
+    API --> PG[(Postgres)]
+    W --> PG
+  end
+  subgraph Ex["Typical Elixir backend: one app, the runtime keeps it up"]
+    direction LR
+    LB2[Load balancer] --> NODE
+    subgraph NODE["BEAM nodes, clustered"]
+      direction LR
+      WEB[Phoenix] ~~~ JOBS[Oban jobs] ~~~ CACHE[ETS cache] ~~~ PS[PubSub]
+    end
+    NODE --> PG2[(Postgres)]
+  end
+  Go ~~~ Ex
+```
+
+| Go is the better choice for                             | Elixir is the better choice for                         |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| CLIs and developer tools: one static binary, fast start | Many long-lived connections: chat, presence, WebSockets |
+| Infrastructure: Kubernetes operators, proxies, agents   | Real-time features and steady latency under load        |
+| CPU-heavy work and tight memory limits                  | Systems that must stay up when parts fail               |
+| Many small services on a platform                       | One product codebase with few moving parts              |
+
+## Use both: Ports
+
+A Port starts an OS program and connects to its stdin and stdout. Go does the CPU work. Elixir owns the OS process.
+
+```elixir
+Slides.go_source("go/port/main.go", from: "func main")
+```
+
+Run it once with `System.cmd`. The program starts, counts and stops.
+
+```elixir
+bin = Slides.go_build("port")
+{output, 0} = System.cmd(bin, ["10", "1000", "10000000"])
+String.split(output)
+```
+
+A Port keeps the program running. Send a number, receive the count of primes below it.
+
+```elixir
+port = Port.open({:spawn_executable, bin}, [:binary, :exit_status, line: 1024])
+
+count_primes = fn n ->
+  Port.command(port, "#{n}\n")
+
+  receive do
+    {^port, {:data, {:eol, line}}} -> String.to_integer(line)
+  after
+    5_000 -> raise "no reply from Go"
+  end
+end
+
+%{
+  os_pid: Port.info(port, :os_pid),
+  counts: for(n <- [10, 1_000, 10_000_000], do: {n, count_primes.(n)})
+}
+```
+
+Close the Port. Go reads the end of stdin and stops.
+
+```elixir
+Port.close(port)
+```
+
+## go-backend: an Elixir app called go-backend
+
+* One Phoenix app, not an umbrella: about 5,000 modules and 550,000 lines in `lib/`, about 100 contexts.
+* About 1,800 test files. 70% of them run with `async: true`.
+* About 150 Oban workers, 11 Ecto repos, about 1,200 migrations.
+* Other languages in the BEAM: a Rust NIF for text processing, and Python through Snex.
+* One release with four node roles (`:api`, `:core`, `:worker`, `:reporting`) in one cluster.
+* Only 16 hand-written GenServers. Phoenix, Oban and Broadway own most processes.
+
+## Boundaries in a big codebase
+
+* Elixir has no `internal/` packages. Any module can call any other module.
+* Boundary adds this check to the compiler. Each boundary lists its `deps` and `exports`. A call outside these rules is a compiler warning.
+* go-backend has 147 boundaries. `dirty_xrefs` lists the known exceptions in old code.
+* **Go:** `internal/` and the rule against import cycles are part of the toolchain.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defmodule AgiDb.Organizations do
+  use Boundary,
+    deps: [AgiDb.Billing, AgiDb.Events, AgiDb.IAM, AgiDb.Repo, AgiDb.Workspaces, ...],
+    exports: [Organization, Commands.CreateOrganization, Events.OrganizationWorkspaceAdded, ...]
+
+  use AgiDb.Knigge,
+    otp_app: :agidb,
+    config_key: :organizations,
+    default: AgiDb.Organizations.Internal.OrganizationsImpl
+
+  @callback create_organization(Commands.CreateOrganization.t()) :: ...
+end
+```
+
+* Each context is a facade: `@callback`s plus Knigge. Knigge sends each call to the implementation from the config.
+* Tests replace the implementation with a Hammox mock (Mox with typespec checks). go-backend has 119 facades.
+* Knigge's last release is from 2021. go-backend wraps it to remove a compile-time dependency.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defmodule AgiDb.Knigge do
+  use Boundary, top_level?: true, check: [in: false]
+
+  defmacro __using__(opts) do
+    opts =
+      Keyword.replace_lazy(opts, :default, fn module ->
+        Macro.expand_literals(module, %{__CALLER__ | function: {:drop_compile_dependency, 1}})
+      end)
+
+    quote do
+      use Knigge, unquote(opts)
+    end
+  end
+end
+```
+
+## Compile times
+
+* **Go:** a fast compiler and the build cache are design goals. Unused imports are errors.
+* **Elixir:** modules depend on each other at compile time, through exports, or at runtime. A change recompiles the compile-time dependents.
+* Macros and `use` add compile-time dependencies. One small change can recompile half of a big app.
+* Tools: `mix xref graph --label compile-connected`, `mix xref trace`, and `--fail-above` for CI.
+* Elixir 1.19 compiles large projects up to 4 times faster. Elixir 1.20 is faster again on many cores.
+
+go-backend checks this in CI.
+
+```bash
+# No more than 10 compile-connected cycles
+mix xref graph --format cycles --label compile-connected --fail-above 10
+
+# definitions.ex files must not depend on other project modules
+mix xref graph --source lib/agidb/.../definitions.ex --fail-above 0
+```
+
+A small trap from `config/config.exs`.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+# The iteration order of a large map follows atom creation order. A different
+# order changes the compile-time config, and Mix then recompiles every file.
+sorted_queues = Enum.sort(queues)
+```
+
+## Takeaways
+
+* Same problems: concurrency, failures, state, data.
+* Go puts the solutions in your code and in the platform. Elixir puts them in the runtime.
+* Choose Go for tools, infrastructure and CPU-heavy services.
+* Choose Elixir for connected, real-time products that must stay up when parts fail.
+* You can use both: a Port, a NIF or a network call away.
+
+Slides and code: [github.com/begedin/elixir-for-gophers](https://github.com/begedin/elixir-for-gophers)
+
+## Questions
