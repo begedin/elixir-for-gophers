@@ -156,7 +156,7 @@ for id <- [1, 2] do
 end
 ```
 
-* A value that does not match any pattern raises `MatchError`. In a process, that is a crash. "Let it crash, with a supervisor" shows what happens next.
+* A value that does not match any pattern raises `MatchError`. In a process, that is a crash.
 * `receive`, `with` and function clauses use the same patterns.
 
 ## Function clauses and pipes
@@ -206,10 +206,10 @@ Neither are 1-1 mapping to OS thread or process.
 
 * each BEAM process has a PID, a mailbox, its own heap and its own garbage collection.
 * Messages are copied. A process cannot change the memory of another process.
-* **Myth:** elixir processes are insanely cheap
+* **Myth:** Elixir processes are insanely cheap
   * Yes compared to an OS thread, but close in cost to goroutine
   * Both cost about 2.6 KB.
-  * The difference is isolation, not size.
+  * The difference is isolation.
 
 ## processes vs goroutines
 
@@ -292,7 +292,7 @@ send(pong, :stop)
 diagram
 ```
 
-> **Verdict:** both runtimes start 100,000 tasks in milliseconds. A PID can get messages from any process, also on another node.
+Both runtimes start 100,000 tasks in milliseconds. A PID can get messages from any process, also on another node.
 
 ## Fan out with a limit
 
@@ -332,7 +332,7 @@ Map.put(results, :ms, div(microseconds, 1000))
 * **Go:** `check` must watch `ctx.Done()`. A check that ignores `ctx` continues after the timeout.
 * **Elixir:** `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow.
 
-> **Verdict:** the code size is similar. Go needs help from every function. Elixir stops the work from outside.
+The code size is similar. Go needs help from every function. Elixir stops the work from outside.
 
 ## Cancellation without context
 
@@ -369,7 +369,7 @@ IO.puts("cell: work alive? #{Process.alive?(task.pid)}")
 * **Elixir:** there is no `ctx` argument. `Task.shutdown/2` or `Process.exit/2` stops a process, wherever its code is.
 * Links send the stop to the child processes too.
 
-> **Verdict:** Elixir can stop any work from outside. Go makes cancellation explicit and visible in each signature.
+Elixir can stop any work from outside. Go makes cancellation explicit and visible in each signature.
 
 ## Errors: same idea, different crash
 
@@ -431,7 +431,7 @@ reasons
 
 **Caveat:** `net/http` recovers a panic in a handler. A panic in a goroutine that the handler starts still stops the server.
 
-> **Verdict:** for expected errors, the two languages agree. For unexpected errors, Elixir stops one process and Go stops the program.
+For expected errors, the two languages agree. For unexpected errors, Elixir stops one process and Go stops the program.
 
 ## Let it crash, with a supervisor
 
@@ -484,13 +484,15 @@ Kino.Layout.grid([
 ])
 ```
 
-> **Verdict:** Elixir restarts small parts of a program. Go usually restarts the whole program, with help from the platform.
+Elixir restarts small parts of a program. Go usually restarts the whole program, with help from the platform.
 
 ## State without locks
 
 100 callers increment a counter at the same time, 1,000 times each.
 
 **Go:** shared memory. One counter has a mutex, the other counter has no lock.
+
+<!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
 Slides.go_source("go/counter/main.go", from: "// Counter is safe")
@@ -537,7 +539,7 @@ Counter.value()
 * **Elixir:** the process handles one message at a time, so it needs no lock.
 * For many concurrent readers, use ETS: an in-memory table with concurrent reads.
 
-> **Verdict:** a Go mutex is faster for hot shared memory. Elixir has no data races, but logic races are still possible.
+A Go mutex is faster for hot shared memory. Elixir has no data races, but logic races are still possible.
 
 ## Many nodes, one system
 
@@ -601,9 +603,11 @@ nodes_seen_by_alpha = :erpc.call(alpha, Node, :list, [])
 nodes_seen_by_alpha
 ```
 
-> **Verdict:** Elixir has clustering built in, for one trusted system. Go with gRPC is better across languages and trust boundaries.
+Elixir has clustering built in, for one trusted system. Go with gRPC is better across languages and trust boundaries.
 
 ## Look inside a running system
+
+Go has excellent profilers for CPU and memory. Elixir lets you look inside a live system and change it.
 
 * In production, `bin/my_app remote` opens an IEx shell inside the running release.
 * Phoenix LiveDashboard and Oban Web show the same data in a browser.
@@ -622,9 +626,9 @@ Read the state of worker 1 from the supervisor slide.
 }
 ```
 
-> **Verdict:** Go has excellent profilers for CPU and memory. Elixir lets you look inside a live system and change it.
-
 ## A web project: Gin and Phoenix
+
+Go lets each team select its layout. Phoenix gives all projects the same layout, so a new developer knows where to look.
 
 * **Go:** Gin is the most used Go web framework (48%). Many teams use only the standard library `net/http` (32%). *JetBrains, Go ecosystem surveys 2025*
 * **Elixir:** `mix phx.new my_app` generates a Phoenix project.
@@ -639,8 +643,6 @@ Read the state of worker 1 from the supervisor slide.
 
 * **Go:** the Go team documents only `cmd/` and `internal/`. Each team selects the rest.
 * **Elixir:** `my_app` holds the business logic, and `my_app_web` holds the HTTP code. The generators add code in the same places.
-
-> **Verdict:** Go lets each team select its layout. Phoenix gives all projects the same layout, so a new developer knows where to look.
 
 ## Talking to the database
 
@@ -673,7 +675,7 @@ def list_active_users(since) do
 end
 ```
 
-> **Verdict:** sqlc checks your SQL when you generate the code. Ecto queries compose, and validation errors are data.
+sqlc checks your SQL when you generate the code. Ecto queries compose, and validation errors are data.
 
 ## Ecto in action
 
@@ -776,6 +778,8 @@ Ecto.Multi.new()
 |> Repo.transact()
 ```
 
+*Oban is often on it's own repo, so this doesn't work this way in practice*
+
 ## Go types and Elixir types
 
 | Go                  | Elixir                                                              |
@@ -828,7 +832,7 @@ def area({:square, side}), do: side * side
 * On a large project, Dialyzer is slow, and its messages are hard to read.
 * The Elixir 1.20 compiler does not read `@spec`. It infers its own types.
 
-> **Verdict:** Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
+Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
 
 ## Project shapes and the right tool
 
