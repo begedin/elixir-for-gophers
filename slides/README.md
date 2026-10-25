@@ -15,7 +15,7 @@ A slide usually has more than one block: text, code and output. The bookmarklet 
 
 * It shows only the current section, at full brightness, with a larger title.
 * It hides the notebook header, the setup cell, the sidebar, the insert buttons and the other sections.
-* It shows a slide counter, for example `5 / 21`, at the bottom right.
+* It shows a slide counter, for example `5 / 21`, at the bottom right. The counter starts after the first slide, which is the title slide, and stops before a slide with the title "Questions". The title slide, the "Questions" slide and the slides after it, for example backup slides, show no counter.
 * It adds keys to move between slides.
 * It changes nothing in the notebook. To stop the slideshow, click the bookmark again or reload the page.
 

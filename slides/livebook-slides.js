@@ -4,6 +4,9 @@
 // title. Run the script one time to start the slide mode. Run it again
 // to stop the slide mode.
 //
+// A counter at the bottom right shows the slide number. It starts after
+// the title slide and stops before a slide with the title "Questions".
+//
 // Keys in the slide mode:
 //   PageDown, ArrowRight: next slide
 //   PageUp, ArrowLeft:    previous slide
@@ -109,7 +112,22 @@
     `;
 
     all[index].scrollIntoView({ block: "start" });
-    counter.textContent = `${index + 1} / ${all.length}`;
+    counter.textContent = counterText(all, index);
+  }
+
+  // The first slide is the title slide, so the counter starts on the
+  // second slide. The counter stops before a slide with the title
+  // "Questions". The title slide, the "Questions" slide and the slides
+  // after it, for example backup slides, show no counter. Without a
+  // "Questions" slide, the counter counts to the last slide.
+  function counterText(all, index) {
+    const questions = all.findIndex(
+      (section) =>
+        section.querySelector("[data-el-section-headline] h2")?.textContent.trim().toLowerCase() ===
+        "questions",
+    );
+    const end = questions === -1 ? all.length : questions;
+    return index >= 1 && index < end ? `${index} / ${end - 1}` : "";
   }
 
   // Start at the section with the focus. If no section has the focus,
