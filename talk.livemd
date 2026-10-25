@@ -8,10 +8,6 @@ Mix.install([
 ])
 
 defmodule Slides do
-  @moduledoc """
-  Helpers for the slides.
-  """
-
   @root __DIR__
 
   @doc """
@@ -232,7 +228,7 @@ Neither is an OS thread or an OS process. Both runtimes run many of them on a fe
 * **Myth:** "Elixir processes are insanely cheap." Cheap compared with an OS thread, but both cost about 2.6 KB. The difference is isolation.
 * "Share memory by communicating" is a Go proverb, but a mutex is also normal Go.
 
-Go gives backpressure with no extra code. The BEAM gives addresses, crash signals and distribution with no extra code.
+Go has backpressure built in. The BEAM has addresses, crash signals and distribution built in.
 
 ## Processes vs goroutines
 
@@ -358,7 +354,7 @@ Map.put(results, :ms, ms)
 * **Go:** `check` must watch `ctx.Done()`. A check that ignores `ctx` continues after the timeout.
 * **Elixir:** `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow.
 
-The code size is similar. Go needs help from every function. Elixir stops the work from outside.
+The code size is similar.
 
 ## Cancellation without context
 
@@ -395,7 +391,7 @@ IO.puts("cell: work alive? #{Process.alive?(task.pid)}")
 * **Elixir:** there is no `ctx` argument. `Task.shutdown/2` or `Process.exit/2` stops a process, wherever its code is.
 * Links send the stop to the child processes too.
 
-Elixir can stop any work from outside. Go makes cancellation explicit and visible in each signature.
+Elixir can stop any work from outside. Go makes cancellation visible in each signature.
 
 ## Errors: same idea, different crash
 
@@ -422,7 +418,7 @@ end
 # if DB.query_user(1) returns {:error, :not_found}, 
 # load_user(1) returns {:error, :not_found}
 # if parse_user(row) returns :invalid_row
-# load_usuer(id) returns :invalid_row
+# load_user(id) returns :invalid_row
 ```
 
 Unexpected errors are different.
@@ -462,7 +458,7 @@ reasons
 
 **Caveat:** `net/http` recovers a panic in a handler. A panic in a goroutine that the handler starts still stops the server.
 
-For expected errors, the two languages agree. For unexpected errors, Elixir stops one process and Go stops the program.
+For unexpected errors, Elixir stops one process and Go stops the program.
 
 ## Let it crash, with a supervisor
 
@@ -567,7 +563,7 @@ Kino.start_child(Counter)
 Counter.value()
 ```
 
-* **Go:** without the mutex, increments get lost. `-race` finds the missing lock, but only when the race occurs during the run.
+* **Go:** without the mutex, increments get lost. `-race` finds a race only when it occurs during the run.
 * **Elixir:** the process handles one message at a time, so it needs no lock.
 * For many concurrent readers, use ETS: an in-memory table with concurrent reads.
 
@@ -638,7 +634,7 @@ Elixir has clustering built in, for one trusted system. Go with gRPC is better a
 
 ## Look inside a running system
 
-Go has excellent profilers for CPU and memory. Elixir lets you look inside a live system and change it.
+Go has good tools for CPU and memory profiling. Elixir lets you look inside a live system and change it.
 
 * In production, `bin/my_app remote` opens an IEx shell inside the running release.
 * Phoenix LiveDashboard and Oban Web show the same data in a browser.
@@ -1033,7 +1029,7 @@ sorted_queues = Enum.sort(queues)
 * Go puts the solutions in your code and in the platform. Elixir puts them in the runtime.
 * Choose Go for tools, infrastructure and CPU-heavy services.
 * Choose Elixir for connected, real-time products that must stay up when parts fail.
-* You can use both: a Port, a NIF or a network call away.
+* You can use both, through a Port, a NIF or a network call.
 
 Slides and code: [github.com/begedin/elixir-for-gophers](https://github.com/begedin/elixir-for-gophers)
 
