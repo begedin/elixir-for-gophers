@@ -218,20 +218,21 @@ words =
 
 Neither is an OS thread or an OS process. Both runtimes run many of them on a few OS threads.
 
-### Go
+|                | Go: goroutines, CSP (Hoare, 1978) | BEAM: processes, actors (Hewitt, 1973) |
+| -------------- | --------------------------------- | -------------------------------------- |
+| The address    | none: you talk to a channel       | a PID, with a mailbox                  |
+| Memory         | one shared heap                   | own heap and own GC                    |
+| Send           | waits for a receiver              | copies the message, does not wait      |
+| Receive        | one channel, or `select`          | own mailbox, by pattern                |
+| Backpressure   | yes: a full channel blocks        | no: a mailbox can grow                 |
+| Failure        | not in the model                  | links and monitors                     |
+| Other machines | no                                | yes, with the same `send/2`            |
 
-* Goroutines have no address. You talk to a goroutine through a channel that you both have.
-* Goroutines share one heap. "Share memory by communicating" is a Go proverb, but a mutex is also normal Go. The race detector finds access with no lock.
-* **Myth:** "Go scheduling is cooperative." Since Go 1.14, the runtime also stops a goroutine in a tight loop, after about 10 ms. The BEAM switches after a fixed amount of work. Go switches after a time.
+* **Myth:** "Go scheduling is cooperative." Since Go 1.14, the runtime also stops a goroutine in a tight loop, after about 10 ms.
+* **Myth:** "Elixir processes are insanely cheap." Cheap compared with an OS thread, but both cost about 2.6 KB. The difference is isolation.
+* "Share memory by communicating" is a Go proverb, but a mutex is also normal Go.
 
-### Elixir
-
-* Each BEAM process has a PID, a mailbox, its own heap and its own garbage collection.
-* Messages are copied. A process cannot change the memory of another process.
-* **Myth:** "Elixir processes are insanely cheap."
-  * Cheap compared with an OS thread, but close to the cost of a goroutine.
-  * Both cost about 2.6 KB.
-  * The difference is isolation.
+Go gives backpressure with no extra code. The BEAM gives addresses, crash signals and distribution with no extra code.
 
 ## Processes vs goroutines
 
