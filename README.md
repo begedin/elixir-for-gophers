@@ -44,4 +44,6 @@ For this talk:
 3. To run a cell during the talk, click into it and press `Cmd+Enter`.
 4. Zoom the browser (`Cmd +`) to make the text larger for the room.
 
+The slides after "Questions" are backup slides for likely questions: CPU speed, deployment, hiring and hot code upgrades. Show them only when someone asks. `End` goes to the last backup slide, not to "Questions".
+
 Some slides depend on earlier slides. "Look inside a running system" reads the workers from "Let it crash, with a supervisor". "Use both: Ports" uses the `Slides` helpers from the setup cell.

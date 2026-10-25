@@ -313,7 +313,7 @@ diagram
 
 Both runtimes start 100,000 tasks in milliseconds. A PID can get messages from any process, also on another node.
 
-## Fan out with a limit
+## Fan out, time out and cancel
 
 Check 100 links, 10 at a time. One link in ten hangs. Stop the wait after 500 ms.
 
@@ -351,47 +351,11 @@ end
 Map.put(results, :ms, ms)
 ```
 
-* **Go:** `check` must watch `ctx.Done()`. A check that ignores `ctx` continues after the timeout.
-* **Elixir:** `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow.
-
-The code size is similar.
-
-## Cancellation without context
-
-**Go:** `work` never checks `ctx`, so `cancel()` does not stop it.
-
-```elixir
-Slides.go_source("go/cancel/main.go", from: "func main")
-```
-
-```elixir
-Slides.go_run("cancel")
-```
-
-**Elixir:** the cell stops the task from outside.
-
-```elixir
-task =
-  Task.async(fn ->
-    for step <- Stream.iterate(1, &(&1 + 1)) do
-      IO.puts("work: step #{step}")
-      Process.sleep(100)
-    end
-  end)
-
-Process.sleep(250)
-Task.shutdown(task, :brutal_kill)
-IO.puts("cell: shutdown")
-
-Process.sleep(250)
-IO.puts("cell: work alive? #{Process.alive?(task.pid)}")
-```
-
-* **Go:** you give `ctx` to every function. A function that ignores `ctx` continues after `cancel()`. Go 1.27 adds a goroutine leak profile to find these goroutines.
-* **Elixir:** there is no `ctx` argument. `Task.shutdown/2` or `Process.exit/2` stops a process, wherever its code is.
+* **Go:** you give `ctx` to every function, and `check` must watch `ctx.Done()`. A function that ignores `ctx` continues after the timeout or `cancel()`. Go 1.27 adds a goroutine leak profile to find these goroutines.
+* **Elixir:** there is no `ctx` argument, and `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow. `Task.shutdown/2` or `Process.exit/2` stops any process, wherever its code is.
 * Links send the stop to the child processes too.
 
-Elixir can stop any work from outside. Go makes cancellation visible in each signature.
+The code size is similar. Elixir can stop any work from outside. Go makes cancellation visible in each signature.
 
 ## Errors: same idea, different crash
 
@@ -745,45 +709,11 @@ CREATE TABLE users (
 """)
 ```
 
-Validation errors are data, not exceptions.
+A transaction is all or nothing. The second insert fails, so the first insert does not stay. Validation errors are data, not exceptions.
 
 ```elixir
 alias Demo.{Repo, User}
 
-{:error, changeset} =
-  %User{}
-  |> User.changeset(%{name: "Ana", email: "not an email"})
-  |> Repo.insert()
-
-changeset.errors
-```
-
-Queries compose. Each step adds to the query.
-
-```elixir
-import Ecto.Query
-
-Repo.delete_all(User)
-
-for {name, email, active} <- [
-      {"Ana", "ana@example.com", true},
-      {"Bo", "bo@example.com", false},
-      {"Cy", "cy@example.org", true},
-      {"Di", "di@example.com", true}
-    ] do
-  %User{} |> User.changeset(%{name: name, email: email, active: active}) |> Repo.insert!()
-end
-
-active = from(u in User, where: u.active)
-query = active |> where([u], like(u.email, "%@example.com")) |> select([u], u.name)
-
-{sql, _params} = Repo.to_sql(:all, query)
-%{sql: sql, names: Repo.all(query)}
-```
-
-A transaction is all or nothing. The second insert fails, so the first insert does not stay.
-
-```elixir
 eve = %User{} |> User.changeset(%{name: "Eve", email: "eve@example.com"})
 mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
 
@@ -796,21 +726,8 @@ mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
 %{failed_step: failed_step, errors: changeset.errors, users_in_db: Repo.aggregate(User, :count)}
 ```
 
-* Oban puts a job in the same `Ecto.Multi`, so the job exists only if the transaction commits. River (Go) does the same with `InsertTx`.
+* Oban can put a job in the same `Ecto.Multi`, so the job exists only if the transaction commits. This works only when Oban uses the same repo as the data. River (Go) does the same with `InsertTx`.
 * The SQL Sandbox gives each test its own transaction, so tests that use Postgres can run with `async: true`.
-
-<!-- livebook:{"force_markdown":true} -->
-
-```elixir
-new_user = %User{} |> User.changeset(attrs)
-
-Ecto.Multi.new()
-|> Ecto.Multi.insert(:user, new_user)
-|> Oban.insert(:welcome, fn %{user: user} -> WelcomeEmail.new(%{user_id: user.id}) end)
-|> Repo.transact()
-```
-
-**Caveat:** this works only when Oban uses the same repo as the data. Many apps give Oban its own repo.
 
 ## Go types and Elixir types
 
@@ -867,27 +784,6 @@ def area({:square, side}), do: side * side
 Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
 
 ## Project shapes and the right tool
-
-```mermaid
-flowchart TB
-  subgraph Go["Typical Go backend: many services, Kubernetes keeps them up"]
-    direction LR
-    LB[Load balancer] --> API[API service] --> Q[[Queue]] --> W[Worker service]
-    API --> R[(Redis)]
-    API --> PG[(Postgres)]
-    W --> PG
-  end
-  subgraph Ex["Typical Elixir backend: one app, the runtime keeps it up"]
-    direction LR
-    LB2[Load balancer] --> NODE
-    subgraph NODE["BEAM nodes, clustered"]
-      direction LR
-      WEB[Phoenix] ~~~ JOBS[Oban jobs] ~~~ CACHE[ETS cache] ~~~ PS[PubSub]
-    end
-    NODE --> PG2[(Postgres)]
-  end
-  Go ~~~ Ex
-```
 
 | Go is the better choice for                             | Elixir is the better choice for                         |
 | ------------------------------------------------------- | ------------------------------------------------------- |
@@ -976,25 +872,6 @@ end
 * Tests replace the implementation with a Hammox mock (Mox with typespec checks). go-backend has 119 facades.
 * Knigge's last release is from 2021. go-backend wraps it to remove a compile-time dependency.
 
-<!-- livebook:{"force_markdown":true} -->
-
-```elixir
-defmodule AgiDb.Knigge do
-  use Boundary, top_level?: true, check: [in: false]
-
-  defmacro __using__(opts) do
-    opts =
-      Keyword.replace_lazy(opts, :default, fn module ->
-        Macro.expand_literals(module, %{__CALLER__ | function: {:drop_compile_dependency, 1}})
-      end)
-
-    quote do
-      use Knigge, unquote(opts)
-    end
-  end
-end
-```
-
 ## Compile times
 
 * **Go:** a fast compiler and the build cache are design goals. Unused imports are errors.
@@ -1013,16 +890,6 @@ mix xref graph --format cycles --label compile-connected --fail-above 10
 mix xref graph --source lib/agidb/.../definitions.ex --fail-above 0
 ```
 
-A small trap from `config/config.exs`.
-
-<!-- livebook:{"force_markdown":true} -->
-
-```elixir
-# The iteration order of a large map follows atom creation order. A different
-# order changes the compile-time config, and Mix then recompiles every file.
-sorted_queues = Enum.sort(queues)
-```
-
 ## Takeaways
 
 * Same problems: concurrency, failures, state, data.
@@ -1034,3 +901,51 @@ sorted_queues = Enum.sort(queues)
 Slides and code: [github.com/begedin/elixir-for-gophers](https://github.com/begedin/elixir-for-gophers)
 
 ## Questions
+
+## Backup: CPU speed
+
+The same sieve of Eratosthenes, for the numbers below 10,000,000, on an Apple M3 Pro.
+
+|                                                         | Time         |
+| ------------------------------------------------------- | ------------ |
+| Go                                                      | 17 ms        |
+| Elixir: a compiled module, the JIT, an `:atomics` array | about 440 ms |
+
+* The BEAM is slow for tight loops over numbers, also with the JIT (since OTP 24).
+* For CPU-heavy work, use a Port (like the Go program in this talk), a NIF in Rust with Rustler, or Nx for numerical work.
+* Most web backends wait for the database and the network, not for the CPU.
+
+## Backup: Deployment
+
+|               | Go                                | Elixir                                                    |
+| ------------- | --------------------------------- | --------------------------------------------------------- |
+| Artifact      | one static binary                 | a release (`mix release`): your code and the runtime      |
+| Minimal size  | 5.2 MB, with `net/http`, stripped | 16 MB                                                     |
+| Start         | less than 10 ms                   | about 0.25 s for the VM, more for a Phoenix app           |
+| Cross-compile | yes: `GOOS` and `GOARCH`          | no: build on the target OS and CPU, usually in Docker     |
+| Cluster       | not necessary                     | DNSCluster (in Phoenix 1.8) or libcluster finds the nodes |
+
+* Measured on this laptop, with a new `mix new --sup` project and a small Go program.
+* `mix phx.gen.release --docker` generates a release and a Dockerfile for a Phoenix app.
+* Both run well on Kubernetes.
+
+## Backup: Hiring and the ecosystem
+
+|                       | Go                                                   | Elixir                                                      |
+| --------------------- | ---------------------------------------------------- | ----------------------------------------------------------- |
+| Used in the last year | 16.4% of the respondents                             | 2.7% of the respondents                                     |
+| Admired               | 56.5%: 8th of 42 languages                           | 65.9%: 3rd, after Rust and Gleam                            |
+| Packages              | no central registry: each Git repository is a module | Hex: about 26,700 packages                                  |
+| Cloud SDKs            | official SDKs from AWS and Kubernetes                | community packages (ExAws, k8s)                             |
+| Hiring                | a large pool of developers                           | a small pool: hire from other languages and teach Elixir    |
+| Static types          | in the language                                      | gradual types in Elixir, or Gleam: static types on the BEAM |
+
+* Source for the first two rows: Stack Overflow Developer Survey 2025.
+* "Admired": the users of a language who want to use it again next year.
+
+## Backup: Hot code upgrades
+
+* The BEAM can load a new version of a module into a running system. The old and the new version can run at the same time.
+* A full hot upgrade of a release needs appup and relup files. Few teams use it in production.
+* Most teams deploy new nodes with a rolling deploy, like a Go service.
+* In development, Phoenix code reloading and IEx `recompile/0` use the same feature every day.

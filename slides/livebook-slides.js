@@ -50,6 +50,11 @@
       margin-top: 0 !important;
     }
 
+    /* Space above the slide title */
+    [data-el-sections-container] > [data-el-section] {
+      padding-top: 3rem;
+    }
+
     .lbs-counter {
       position: fixed;
       right: 16px;
