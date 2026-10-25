@@ -36,7 +36,7 @@ defmodule Slides do
       |> drop_header(opts[:from])
 
     html = Makeup.highlight(source, lexer: lexer, lexer_options: lexer_opts)
-    css = Makeup.stylesheet(Makeup.Styles.HTML.StyleMap.one_dark_style())
+    css = Makeup.Styles.HTML.StyleMap.one_dark_style() |> Makeup.stylesheet()
 
     Kino.HTML.new("""
     <style>
@@ -66,7 +66,7 @@ defmodule Slides do
     * `:race` - build the program with the race detector (`-race`)
   """
   def go_run(name, opts \\ []) do
-    {output, status} = System.cmd(go_build(name, opts), [], stderr_to_stdout: true)
+    {output, status} = name |> go_build(opts) |> System.cmd([], stderr_to_stdout: true)
     Kino.Text.new(output <> "\nexit status #{status}", terminal: true)
   end
 
@@ -77,7 +77,7 @@ defmodule Slides do
   def go_build(name, opts \\ []) do
     go = System.find_executable("go") || raise "go is not in PATH"
     race = Keyword.get(opts, :race, false)
-    bin = Path.join(System.tmp_dir!(), "elixir_for_gophers_#{name}#{if race, do: "_race"}")
+    bin = System.tmp_dir!() |> Path.join("elixir_for_gophers_#{name}#{if race, do: "_race"}")
     flags = if race, do: ["-race"], else: []
     args = ["build", "-trimpath"] ++ flags ++ ["-o", bin, "./go/#{name}"]
 
@@ -147,7 +147,11 @@ second
 ```
 
 ```elixir
-{:ok, %{name: "Annie"}} = response
+try do
+  {:ok, %{name: "Annie"}} = response
+rescue
+  error in MatchError -> Exception.format(:error, error) |> Kino.Text.new(terminal: true)
+end
 ```
 
 **Elixir:** `case` runs the first branch whose pattern matches.
@@ -257,14 +261,14 @@ defmodule Spawner do
 end
 
 before = :erlang.memory(:processes)
-{microseconds, pids} = :timer.tc(fn -> Spawner.start(100_000) end)
+{ms, pids} = :timer.tc(fn -> Spawner.start(100_000) end, :millisecond)
 used = :erlang.memory(:processes) - before
 Enum.each(pids, &send(&1, :stop))
 
 Kino.Text.new(
   """
   processes: 100000
-  time: #{div(microseconds, 1000)} ms
+  time: #{ms} ms
   bytes per process: #{div(used, 100_000)}
   """,
   terminal: true
@@ -331,20 +335,23 @@ Slides.go_run("fanout")
 ```elixir
 check = fn link ->
   if rem(link, 10) == 0, do: Process.sleep(:infinity)
-  Process.sleep(:rand.uniform(200))
+  :rand.uniform(200) |> Process.sleep()
 end
 
-{microseconds, results} =
-  :timer.tc(fn ->
-    0..99
-    |> Task.async_stream(check, max_concurrency: 10, timeout: 500, on_timeout: :kill_task)
-    |> Enum.frequencies_by(fn
-      {:ok, _} -> :ok
-      {:exit, :timeout} -> :timeout
-    end)
-  end)
+{ms, results} =
+  :timer.tc(
+    fn ->
+      0..99
+      |> Task.async_stream(check, max_concurrency: 10, timeout: 500, on_timeout: :kill_task)
+      |> Enum.frequencies_by(fn
+        {:ok, _} -> :ok
+        {:exit, :timeout} -> :timeout
+      end)
+    end,
+    :millisecond
+  )
 
-Map.put(results, :ms, div(microseconds, 1000))
+Map.put(results, :ms, ms)
 ```
 
 * **Go:** `check` must watch `ctx.Done()`. A check that ignores `ctx` continues after the timeout.
@@ -498,7 +505,7 @@ Kino.Process.sup_tree(Workers)
 Kill worker 2. The supervisor starts a new worker 2 with a new PID.
 
 ```elixir
-{2, pid, :worker, _} = List.keyfind(Supervisor.which_children(Workers), 2, 0)
+{2, pid, :worker, _} = Workers |> Supervisor.which_children() |> List.keyfind(2, 0)
 Process.exit(pid, :kill)
 Process.sleep(100)
 
@@ -582,8 +589,8 @@ start_node = fn prefix ->
       host: ~c"127.0.0.1",
       longnames: true,
       connection: :standard_io,
-      exec: String.to_charlist(Path.join(:code.root_dir(), "bin/erl")),
-      args: [~c"-setcookie", Atom.to_charlist(Node.get_cookie())]
+      exec: :code.root_dir() |> Path.join("bin/erl") |> String.to_charlist(),
+      args: [~c"-setcookie", Node.get_cookie() |> Atom.to_charlist()]
     })
 
   :ok = :peer.call(peer, :code, :add_paths, [:code.get_path()])
@@ -640,12 +647,12 @@ Go has excellent profilers for CPU and memory. Elixir lets you look inside a liv
 Read the state of worker 1 from the supervisor slide.
 
 ```elixir
-{1, pid, _, _} = List.keyfind(Supervisor.which_children(Workers), 1, 0)
+{1, pid, _, _} = Workers |> Supervisor.which_children() |> List.keyfind(1, 0)
 
 %{
   state: :sys.get_state(pid),
   info: Process.info(pid, [:memory, :message_queue_len, :reductions]),
-  processes_on_this_node: length(Process.list())
+  processes_on_this_node: Process.list() |> length()
 }
 ```
 
@@ -728,7 +735,7 @@ defmodule Demo.User do
   end
 end
 
-database = Path.join(System.tmp_dir!(), "elixir_for_gophers.db")
+database = System.tmp_dir!() |> Path.join("elixir_for_gophers.db")
 File.rm(database)
 Kino.start_child({Demo.Repo, database: database, pool_size: 1, log: false})
 
@@ -780,10 +787,13 @@ query = active |> where([u], like(u.email, "%@example.com")) |> select([u], u.na
 A transaction is all or nothing. The second insert fails, so the first insert does not stay.
 
 ```elixir
+eve = %User{} |> User.changeset(%{name: "Eve", email: "eve@example.com"})
+mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
+
 {:error, failed_step, changeset, _changes_so_far} =
   Ecto.Multi.new()
-  |> Ecto.Multi.insert(:eve, User.changeset(%User{}, %{name: "Eve", email: "eve@example.com"}))
-  |> Ecto.Multi.insert(:mal, User.changeset(%User{}, %{name: "Mal", email: "no email"}))
+  |> Ecto.Multi.insert(:eve, eve)
+  |> Ecto.Multi.insert(:mal, mal)
   |> Repo.transact()
 
 %{failed_step: failed_step, errors: changeset.errors, users_in_db: Repo.aggregate(User, :count)}
@@ -795,8 +805,10 @@ A transaction is all or nothing. The second insert fails, so the first insert do
 <!-- livebook:{"force_markdown":true} -->
 
 ```elixir
+new_user = %User{} |> User.changeset(attrs)
+
 Ecto.Multi.new()
-|> Ecto.Multi.insert(:user, User.changeset(%User{}, attrs))
+|> Ecto.Multi.insert(:user, new_user)
 |> Oban.insert(:welcome, fn %{user: user} -> WelcomeEmail.new(%{user_id: user.id}) end)
 |> Repo.transact()
 ```
