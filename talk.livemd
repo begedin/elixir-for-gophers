@@ -105,19 +105,19 @@ Nikola Begedin · V7
 
 ## Same problems, different solutions
 
-1. The language: pattern matching, function clauses, pipes
-2. The runtime: processes, failures, state, clusters
-3. A web project: the layout and the database
+1. Language features
+2. Runtime
+3. Typical web project
 4. Types, project shapes and the right tool
-5. A real Elixir codebase, and how to keep it in shape
+5. An example of a real codebase
 
 ## Where we meet
 
 * **Go:** *Go Developer Survey 2025* 74% build CLIs, 73% build API services, 46% build websites and 38% build cloud infrastructure tools.
-* **Elixir:** *2025 Elixir community survey* 97% use Phoenix (web + API), 86% use LiveView
+* **Elixir:** *2025 Elixir community survey* 97% use Phoenix (web + API), 86% use LiveView.
 * **Where we meet?** Web API.
 
-#### Tooling similarities
+#### Similarities
 
 | Go                     | Elixir                              |
 | ---------------------- | ----------------------------------- |
@@ -130,9 +130,7 @@ Nikola Begedin · V7
 
 Small languages. No classes. No inheritance.
 
-## Pattern matching
-
-**Go:** `=` assigns a value. A `switch` or a type switch selects a branch.
+## Language: Pattern matching
 
 **Elixir:** `=` is a match. The left side is a pattern, and the match binds the variables in it.
 
@@ -143,7 +141,16 @@ response = {:ok, %{name: "Ana", langs: ["Go", "Elixir"]}}
 {name, first}
 ```
 
-**Elixir:** `case` runs the first branch whose pattern matches. Many functions return `{:ok, value}` or an error, and one `case` handles both.
+```elixir
+{:ok, %{name: "Ana", langs: ["Go", second]}} = response
+second
+```
+
+```elixir
+{:ok, %{name: "Annie"}} = response
+```
+
+**Elixir:** `case` runs the first branch whose pattern matches.
 
 ```elixir
 users = %{1 => "Ana"}
@@ -157,6 +164,7 @@ end
 ```
 
 * A value that does not match any pattern raises `MatchError`. In a process, that is a crash.
+* A case with a missing clause -> `CaseClauseError`
 * `receive`, `with` and function clauses use the same patterns.
 
 ## Function clauses and pipes
@@ -176,12 +184,19 @@ end
 for code <- [200, 404, 503, 302], do: {code, Status.text(code)}
 ```
 
-**Go:** `strings.Fields(strings.ToUpper(strings.TrimSpace(title)))`. You read it from the inside out.
+* `def text(_code)` - catch-all clause
+* without it -> `FunctionClauseError`
 
-**Elixir:** `x |> f(y)` is `f(x, y)`. You read the steps from top to bottom.
+<!-- livebook:{"break_markdown":true} -->
+
+* `|>` is the pipe operator. Takes output of left function, passes as first argument into right
+  function.
+* allows nested function calls to be written left to right or top to bottom
 
 ```elixir
 title = "  elixir for gophers  "
+
+# words = String.split(String.upcase(String.trim(title)))
 
 words =
   title
@@ -189,12 +204,15 @@ words =
   |> String.upcase()
   |> String.split()
 
+# can also be 
+# words = title |> String.trim() |> String.upcase() |> String.split()
+
 {title, words}
 ```
 
-## processes vs goroutines
+## Processes vs goroutines
 
-Neither are 1-1 mapping to OS thread or process.
+Neither is an OS thread or an OS process. Both runtimes run many of them on a few OS threads.
 
 ### Go
 
@@ -204,14 +222,14 @@ Neither are 1-1 mapping to OS thread or process.
 
 ### Elixir
 
-* each BEAM process has a PID, a mailbox, its own heap and its own garbage collection.
+* Each BEAM process has a PID, a mailbox, its own heap and its own garbage collection.
 * Messages are copied. A process cannot change the memory of another process.
-* **Myth:** Elixir processes are insanely cheap
-  * Yes compared to an OS thread, but close in cost to goroutine
+* **Myth:** "Elixir processes are insanely cheap."
+  * Cheap compared with an OS thread, but close to the cost of a goroutine.
   * Both cost about 2.6 KB.
   * The difference is isolation.
 
-## processes vs goroutines
+## Processes vs goroutines
 
 **Go:** start 100,000 goroutines that wait on a channel.
 
@@ -392,6 +410,11 @@ def load_user(id) do
     {:ok, user}
   end
 end
+
+# if DB.query_user(1) returns {:error, :not_found}, 
+# load_user(1) returns {:error, :not_found}
+# if parse_user(row) returns :invalid_row
+# load_usuer(id) returns :invalid_row
 ```
 
 Unexpected errors are different.
@@ -441,6 +464,7 @@ For expected errors, the two languages agree. For unexpected errors, Elixir stop
   * `:rest_for_one` restarts the crashed child and all children that started after it. Use it when later children depend on earlier ones.
   * `:one_for_all` restarts all children. Use it when the children work only as a group.
 * Too many crashes in a short time: the supervisor stops too, and its own supervisor decides.
+  * Goes all the way up to the application supervisor and application crashes - common trap for those new to Elixir
 * **Go:** a `recover` loop around each goroutine, or Kubernetes restarts the whole program.
 
 **Elixir:** a supervisor with three workers.
@@ -546,7 +570,6 @@ A Go mutex is faster for hot shared memory. Elixir has no data races, but logic 
 * Distributed Erlang connects BEAM nodes. `send/2` works the same for a PID on another node.
 * Phoenix.PubSub, Channels and LiveView use this to send events to every node in a cluster.
 * **Go:** gRPC, NATS or Redis between services, plus service discovery.
-* **Caveat:** the nodes trust each other fully (one shared cookie). Use it only in a private network.
 
 Start two more nodes on this laptop.
 
@@ -778,7 +801,7 @@ Ecto.Multi.new()
 |> Repo.transact()
 ```
 
-*Oban is often on it's own repo, so this doesn't work this way in practice*
+**Caveat:** this works only when Oban uses the same repo as the data. Many apps give Oban its own repo.
 
 ## Go types and Elixir types
 
