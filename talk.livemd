@@ -126,7 +126,7 @@ Nikola Begedin · V7
 
 Small languages. No classes. No inheritance.
 
-## Language: Pattern matching
+## Pattern matching
 
 **Elixir:** `=` is a match. The left side is a pattern, and the match binds the variables in it.
 
@@ -157,7 +157,7 @@ responses = [
   {:ok, %{status: 200, body: %{name: "Ana", langs: ["Go", "Elixir"]}}},
   {:ok, %{status: 200, body: %{name: "Bo", langs: []}}},
   {:ok, %{status: 404, body: %{error: "user not found"}}},
-  {:error, :timeout},
+  {:error, :timeout}
 ]
 
 for response <- responses do
@@ -168,13 +168,11 @@ for response <- responses do
     {:error, reason} -> "request failed: #{reason}"
   end
 end
-
-
 ```
 
-* A value that does not match any pattern raises `MatchError`. In a process, that is a crash.
-* A case with a missing clause -> `CaseClauseError`
-* `receive`, `with` and function clauses use the same patterns.
+* If a value does not match the pattern, you get a `MatchError`. In a process, that is a crash.
+* If no `case` clause matches, you get a `CaseClauseError`.
+* `receive`, `with` and function clauses all use the same patterns.
 
 ## Function clauses and pipes
 
@@ -193,14 +191,13 @@ end
 for code <- [200, 404, 503, 302], do: {code, Status.text(code)}
 ```
 
-* `def text(_code)` - catch-all clause
-* without it -> `FunctionClauseError`
+* `def text(_code)` is the catch-all. It matches every code that the other clauses miss.
+* Without it, an unknown code gives you a `FunctionClauseError`.
 
 <!-- livebook:{"break_markdown":true} -->
 
-* `|>` is the pipe operator. Takes output of left function, passes as first argument into right
-  function.
-* allows nested function calls to be written left to right or top to bottom
+* `|>` is the pipe operator. It takes the value on its left and gives it to the next function as the first argument.
+* So you can write nested calls as steps, and read them from top to bottom.
 
 ```elixir
 title = "  elixir for gophers  "
@@ -259,12 +256,12 @@ Neither is an OS thread or an OS process. Both runtimes run many of them on a fe
 | Other machines | no                                | yes, with the same `send/2`            |
 
 * **Myth:** "Go scheduling is cooperative." Since Go 1.14, the runtime also stops a goroutine in a tight loop, after about 10 ms.
-* **Myth:** "Elixir processes are insanely cheap." Cheap compared with an OS thread, but both cost about 2.6 KB. The difference is isolation.
+* **Myth:** "Elixir processes are insanely cheap." Cheap compared with an OS thread, but both cost less than 3 KB. The difference is isolation.
 * "Share memory by communicating" is a Go proverb, but a mutex is also normal Go.
 
 Go has backpressure built in. The BEAM has addresses, crash signals and distribution built in.
 
-## Processes vs goroutines
+## Processes vs goroutines, in code
 
 **Go:** start 100,000 goroutines that wait on a channel.
 
@@ -416,7 +413,7 @@ def load_user(id) do
   end
 end
 
-# if DB.query_user(1) returns {:error, :not_found}, 
+# if Db.query_user(1) returns {:error, :not_found},
 # load_user(1) returns {:error, :not_found}
 # if parse_user(row) returns :invalid_row
 # load_user(id) returns :invalid_row
@@ -469,7 +466,7 @@ For unexpected errors, Elixir stops one process and Go stops the program.
   * `:rest_for_one` restarts the crashed child and all children that started after it. Use it when later children depend on earlier ones.
   * `:one_for_all` restarts all children. Use it when the children work only as a group.
 * Too many crashes in a short time: the supervisor stops too, and its own supervisor decides.
-  * Goes all the way up to the application supervisor and application crashes - common trap for those new to Elixir
+  * If the crashes continue, the stop moves all the way to the application supervisor, and the whole app stops. Many people who are new to Elixir do not expect this.
 * **Go:** a `recover` loop around each goroutine, or Kubernetes restarts the whole program.
 
 **Elixir:** a supervisor with three workers.
@@ -520,8 +517,6 @@ Elixir restarts small parts of a program. Go usually restarts the whole program,
 100 callers increment a counter at the same time, 1,000 times each.
 
 **Go:** shared memory. One counter has a mutex, the other counter has no lock.
-
-<!-- livebook:{"reevaluate_automatically":true} -->
 
 ```elixir
 Slides.go_source("go/counter/main.go", from: "// Counter is safe")
@@ -846,63 +841,7 @@ def area({:square, side}), do: side * side
 
 Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
 
-## When to use what
-
-| Go is the better choice for                             | Elixir is the better choice for                         |
-| ------------------------------------------------------- | ------------------------------------------------------- |
-| CLIs and developer tools: one static binary, fast start | Many long-lived connections: chat, presence, WebSockets |
-| Infrastructure: Kubernetes operators, proxies, agents   | Real-time features and steady latency under load        |
-| CPU-heavy work and tight memory limits                  | Systems that must stay up when parts fail               |
-| Many small services on a platform                       | One product codebase with few moving parts              |
-
-## Use both: Ports
-
-A Port starts an OS program and connects to its stdin and stdout. Go does the CPU work. Elixir owns the OS process.
-
-```elixir
-Slides.go_source("go/port/main.go", from: "func main")
-```
-
-Run it once with `System.cmd`. The program starts, counts and stops.
-
-```elixir
-bin = Slides.go_build("port")
-{output, 0} = System.cmd(bin, ["10", "1000", "10000000"])
-String.split(output)
-```
-
-```elixir
-bin
-```
-
-A Port keeps the program running. Send a number, receive the count of primes below it.
-
-```elixir
-port = Port.open({:spawn_executable, bin}, [:binary, :exit_status, line: 1024])
-
-count_primes = fn n ->
-  Port.command(port, "#{n}\n")
-
-  receive do
-    {^port, {:data, {:eol, line}}} -> String.to_integer(line)
-  after
-    5_000 -> raise "no reply from Go"
-  end
-end
-
-%{
-  os_pid: Port.info(port, :os_pid),
-  counts: for(n <- [10, 1_000, 10_000_000], do: {n, count_primes.(n)})
-}
-```
-
-Close the Port. Go reads the end of stdin and stops.
-
-```elixir
-Port.close(port)
-```
-
-## go-backend: an Elixir app called go-backend
+## An Elixir app called go-backend
 
 One Phoenix app, not an umbrella. The numbers are from `main` in October 2026.
 
@@ -962,10 +901,67 @@ mix xref graph --format cycles --label compile-connected --fail-above 10
 mix xref graph --source lib/agidb/.../definitions.ex --fail-above 0
 ```
 
+## When to use what
+
+| Go is the better choice for                             | Elixir is the better choice for                         |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| CLIs and developer tools: one static binary, fast start | Many long-lived connections: chat, presence, WebSockets |
+| Infrastructure: Kubernetes operators, proxies, agents   | Real-time features and steady latency under load        |
+| CPU-heavy work and tight memory limits                  | Systems that must stay up when parts fail               |
+| Many small services on a platform                       | One product codebase with few moving parts              |
+
+## Use both: Ports
+
+A Port starts an OS program and connects to its stdin and stdout. Go does the CPU work. Elixir owns the OS process.
+
+```elixir
+Slides.go_source("go/port/main.go", from: "func main")
+```
+
+Run it once with `System.cmd`. The program starts, counts and stops.
+
+```elixir
+bin = Slides.go_build("port")
+{output, 0} = System.cmd(bin, ["10", "1000", "10000000"])
+String.split(output)
+```
+
+```elixir
+bin
+```
+
+A Port keeps the program running. Send a number, receive the count of primes below it.
+
+```elixir
+port = Port.open({:spawn_executable, bin}, [:binary, :exit_status, line: 1024])
+
+count_primes = fn n ->
+  Port.command(port, "#{n}\n")
+
+  receive do
+    {^port, {:data, {:eol, line}}} -> String.to_integer(line)
+  after
+    5_000 -> raise "no reply from Go"
+  end
+end
+
+%{
+  os_pid: Port.info(port, :os_pid),
+  counts: for(n <- [10, 1_000, 10_000_000], do: {n, count_primes.(n)})
+}
+```
+
+Close the Port. Go reads the end of stdin and stops.
+
+```elixir
+Port.close(port)
+```
+
 ## Takeaways
 
 * Same problems: concurrency, failures, state, data.
 * Go puts the solutions in your code and in the platform. Elixir puts them in the runtime.
+* Go's types are stronger today. Pattern matching and pipes change how Elixir code reads.
 * Choose Go for tools, infrastructure and CPU-heavy services.
 * Choose Elixir for connected, real-time products that must stay up when parts fail.
 * You can use both, through a Port, a NIF or a network call.
