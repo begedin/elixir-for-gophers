@@ -150,17 +150,26 @@ rescue
 end
 ```
 
-**Elixir:** `case` runs the first branch whose pattern matches.
+**Elixir:** `case` runs the first branch whose pattern matches. Put the most specific patterns first.
 
 ```elixir
-users = %{1 => "Ana"}
+responses = [
+  {:ok, %{status: 200, body: %{name: "Ana", langs: ["Go", "Elixir"]}}},
+  {:ok, %{status: 200, body: %{name: "Bo", langs: []}}},
+  {:ok, %{status: 404, body: %{error: "user not found"}}},
+  {:error, :timeout},
+]
 
-for id <- [1, 2] do
-  case Map.fetch(users, id) do
-    {:ok, name} -> "user #{id}: #{name}"
-    :error -> "user #{id}: not found"
+for response <- responses do
+  case response do
+    {:ok, %{status: 200, body: %{name: name, langs: [first | _]}}} -> "#{name} writes #{first}"
+    {:ok, %{status: 200, body: %{name: name, langs: []}}} -> "#{name} writes nothing yet"
+    {:ok, %{status: status, body: %{error: message}}} -> "HTTP #{status}: #{message}"
+    {:error, reason} -> "request failed: #{reason}"
   end
 end
+
+
 ```
 
 * A value that does not match any pattern raises `MatchError`. In a process, that is a crash.
