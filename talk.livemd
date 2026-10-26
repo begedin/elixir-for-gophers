@@ -213,10 +213,35 @@ words =
   |> String.upcase()
   |> String.split()
 
-# can also be 
+# can also be
 # words = title |> String.trim() |> String.upcase() |> String.split()
 
 {title, words}
+```
+
+## Protocols and behaviours
+
+**Go:** one interface type for both cases. A type satisfies it implicitly.
+
+**Elixir:** two explicit tools.
+
+* **Protocol:** a function with one implementation for each data type, like a Go interface for values. `to_string/1` uses the `String.Chars` protocol.
+* **Behaviour:** a list of callbacks that a module must define, like a Go interface for modules. `GenServer` is a behaviour. A missing callback gives a compiler warning.
+
+```elixir
+defprotocol Describe do
+  def describe(value)
+end
+
+defimpl Describe, for: Integer do
+  def describe(n), do: "the number #{n}"
+end
+
+defimpl Describe, for: Map do
+  def describe(map), do: "a map with #{map_size(map)} keys"
+end
+
+for value <- [42, %{a: 1, b: 2}], do: Describe.describe(value)
 ```
 
 ## Processes vs goroutines
@@ -765,26 +790,25 @@ mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
 %{failed_step: failed_step, errors: changeset.errors, users_in_db: Repo.aggregate(User, :count)}
 ```
 
-* Oban can put a job in the same `Ecto.Multi`, so the job exists only if the transaction commits. This works only when Oban uses the same repo as the data. River (Go) does the same with `InsertTx`.
-* The SQL Sandbox gives each test its own transaction, so tests that use Postgres can run with `async: true`.
+* The SQL Sandbox gives **each test its own transaction**, so tests that use Postgres can run with `async: true`.
 
 ## Go types and Elixir types
 
-| Go                  | Elixir                                                              |
-| ------------------- | ------------------------------------------------------------------- |
-| `int64`, `float64`  | integer with no size limit, float                                   |
-| `string`            | string: a UTF-8 binary                                              |
-| `[]T`               | list (a linked list), or tuple (fixed size)                         |
-| `map[K]V`           | map, with keys and values of any type                               |
-| `struct`            | struct: a map with fixed keys                                       |
-| `const` with `iota` | atoms: `:active`, `:banned`                                         |
-| `error`, `nil`      | `{:error, reason}`. `nil` is an atom                                |
-| pointers            | none: all data is immutable                                         |
-| interfaces          | protocols (for data) and behaviours (for modules, like `GenServer`) |
+| Go                                     | Elixir                                                      |
+| -------------------------------------- | ----------------------------------------------------------- |
+| `int64`: wraps on overflow             | integer with no size limit: `2 ** 100` is exact             |
+| `float64`, `float32`                   | float: always 64-bit. `7 / 2` is `3.5`, `div(7, 2)` is `3`  |
+| `string`, `[]byte`                     | string (UTF-8 bytes), binary (any bytes)                    |
+| `[]T`                                  | list: a linked list, so index access is slow                |
+| multiple return values: `(value, err)` | tuple: a fixed-size value, for example `{:ok, value}`       |
+| `map[K]V`                              | map, with keys and values of any type                       |
+| `struct`                               | struct: a map with fixed keys, and no field types           |
+| `const` with `iota`                    | atoms: `:active`, `:banned`                                 |
+| `error`                                | `{:error, reason}`, or an exception for an unexpected error |
+| `nil`                                  | `nil`: an atom. `nil` and `false` are the only falsy values |
+| pointers                               | none: all data is immutable                                 |
 
-* **Go:** a variable has a type. The compiler checks every assignment and every call.
-* **Elixir:** a value has a type, but a variable does not. The same variable can hold an integer or a string.
-* An integer does not overflow. `2 ** 100` gives the exact value.
+**Go:** a variable has a type. **Elixir:** a value has a type, and a variable can hold any value.
 
 ## Type checking
 
@@ -822,7 +846,7 @@ def area({:square, side}), do: side * side
 
 Go gives stronger guarantees today. Elixir finds more bugs with each release, with no change to your code.
 
-## Project shapes and the right tool
+## When to use what
 
 | Go is the better choice for                             | Elixir is the better choice for                         |
 | ------------------------------------------------------- | ------------------------------------------------------- |
@@ -845,6 +869,10 @@ Run it once with `System.cmd`. The program starts, counts and stops.
 bin = Slides.go_build("port")
 {output, 0} = System.cmd(bin, ["10", "1000", "10000000"])
 String.split(output)
+```
+
+```elixir
+bin
 ```
 
 A Port keeps the program running. Send a number, receive the count of primes below it.
@@ -876,8 +904,13 @@ Port.close(port)
 
 ## go-backend: an Elixir app called go-backend
 
-* One Phoenix app, not an umbrella: about 5,000 modules and 550,000 lines in `lib/`, about 100 contexts.
-* About 1,800 test files. 70% of them run with `async: true`.
+One Phoenix app, not an umbrella. The numbers are from `main` in October 2026.
+
+| Contexts | Modules | Lines of code in `lib/` | Test files |
+| -------- | ------- | ----------------------- | ---------- |
+| 124      | 5,018   | about 557,000           | 1,896      |
+
+* 70% of the test files run with `async: true`.
 * About 150 Oban workers, 11 Ecto repos, about 1,200 migrations.
 * Other languages in the BEAM: a Rust NIF for text processing, and Python through Snex.
 * One release with four node roles (`:api`, `:core`, `:worker`, `:reporting`) in one cluster.
@@ -887,7 +920,7 @@ Port.close(port)
 
 * Elixir has no `internal/` packages. Any module can call any other module.
 * Boundary adds this check to the compiler. Each boundary lists its `deps` and `exports`. A call outside these rules is a compiler warning.
-* go-backend has 147 boundaries. `dirty_xrefs` lists the known exceptions in old code.
+* go-backend has 149 boundaries. `dirty_xrefs` lists the known exceptions in old code.
 * **Go:** `internal/` and the rule against import cycles are part of the toolchain.
 
 <!-- livebook:{"force_markdown":true} -->
