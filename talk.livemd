@@ -314,9 +314,12 @@ pong =
     receive do
       :pong -> :ok
     end
+
+    send(pong, :stop)
+
+    :ok
   end)
 
-send(pong, :stop)
 diagram
 ```
 
@@ -339,7 +342,7 @@ Slides.go_run("fanout")
 **Elixir:** `Task.async_stream/3` limits the tasks and stops a slow task.
 
 ```elixir
-check = fn link ->
+check = fn link when is_integer(link) ->
   if rem(link, 10) == 0, do: Process.sleep(:infinity)
   :rand.uniform(200) |> Process.sleep()
 end
@@ -548,7 +551,7 @@ A Go mutex is faster for hot shared memory. Elixir has no data races, but logic 
 * Phoenix.PubSub, Channels and LiveView use this to send events to every node in a cluster.
 * **Go:** gRPC, NATS or Redis between services, plus service discovery.
 
-Start two more nodes on this laptop.
+Start two more nodes on this laptop. By default, visible nodes connect in a full mesh: when one node connects to `alpha` and `beta`, they also connect to each other. `-connect_all false` turns that off, so the cells below can show each connection.
 
 ```elixir
 start_node = fn prefix ->
@@ -560,7 +563,12 @@ start_node = fn prefix ->
       longnames: true,
       connection: :standard_io,
       exec: :code.root_dir() |> Path.join("bin/erl") |> String.to_charlist(),
-      args: [~c"-setcookie", Node.get_cookie() |> Atom.to_charlist()]
+      args: [
+        ~c"-setcookie",
+        Node.get_cookie() |> Atom.to_charlist(),
+        ~c"-connect_all",
+        ~c"false"
+      ]
     })
 
   :ok = :peer.call(peer, :code, :add_paths, [:code.get_path()])
@@ -592,15 +600,38 @@ after
 end
 ```
 
-Connect `alpha` to `beta`, then stop both nodes.
+Which nodes do `alpha` and this notebook see? `alpha` sees only the notebook. Livebook runs this notebook as a hidden node, and `Node.list/0` shows only visible nodes, so the cell uses `Node.list(:connected)`. The `livebook_…` node in the notebook's list is the Livebook server.
+
+```elixir
+seen = fn ->
+  %{
+    alpha: :erpc.call(alpha, Node, :list, [:connected]),
+    notebook: Node.list(:connected)
+  }
+end
+
+seen.()
+```
+
+Connect `alpha` to `beta`, and list again. Now `alpha` sees `beta` too.
 
 ```elixir
 true = :erpc.call(alpha, Node, :connect, [beta])
-nodes_seen_by_alpha = :erpc.call(alpha, Node, :list, [])
+seen.()
+```
 
-:peer.stop(alpha_peer)
+Stop `beta`.
+
+```elixir
 :peer.stop(beta_peer)
-nodes_seen_by_alpha
+```
+
+List again. Nobody sees `beta` now. Then stop `alpha` too.
+
+```elixir
+nodes = seen.()
+:peer.stop(alpha_peer)
+nodes
 ```
 
 Elixir has clustering built in, for one trusted system. Go with gRPC is better across languages and trust boundaries.
@@ -666,11 +697,10 @@ Slides.go_source("go/snippets/sqlc.go", from: "// sqlc reads")
 
 ```elixir
 def list_active_users(since) do
-  from(u in User,
-    where: u.active and u.inserted_at > ^since,
-    order_by: u.name,
-    select: [:id, :name, :email]
-  )
+  User
+  |> where([u], u.active and u.inserted_at > ^since)
+  |> order_by(:name)
+  |> select([:id, :name, :email])
   |> Repo.all()
 end
 ```
