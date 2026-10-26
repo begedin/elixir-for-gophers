@@ -104,7 +104,7 @@ Nikola Begedin · V7
 1. Language features
 2. Runtime
 3. Typical web project
-4. Types, project shapes and the right tool
+4. Types, project shapes
 5. An example of a real codebase
 
 ## Where we meet
@@ -119,8 +119,8 @@ Nikola Begedin · V7
 | ---------------------- | ----------------------------------- |
 | `go fmt`               | `mix format`                        |
 | `go test`              | `mix test` (ExUnit)                 |
-| `go doc`               | `h/1` in IEx, ExDoc                 |
-| `go mod`               | Mix and Hex                         |
+| `go doc`, pkg.go.dev   | `h/1` in IEx, ExDoc and HexDocs     |
+| `go mod`, `go get`     | `mix deps.get`, Hex                 |
 | `if err != nil`        | `{:ok, value}` / `{:error, reason}` |
 | structs and interfaces | structs, protocols and behaviours   |
 
