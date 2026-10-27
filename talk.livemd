@@ -104,7 +104,7 @@ Nikola Begedin · V7
 1. Language features
 2. Runtime
 3. Typical web project
-4. Types, project shapes
+4. Types
 5. An example of a real codebase
 
 ## Where we meet
@@ -364,7 +364,7 @@ Slides.go_run("fanout")
 **Elixir:** `Task.async_stream/3` limits the tasks and stops a slow task.
 
 ```elixir
-check = fn link when is_integer(link) ->
+check = fn link ->
   if rem(link, 10) == 0, do: Process.sleep(:infinity)
   :rand.uniform(200) |> Process.sleep()
 end
@@ -389,7 +389,7 @@ Map.put(results, :ms, ms)
 * **Elixir:** there is no `ctx` argument, and `check` knows nothing about timeouts. `Task.async_stream/3` kills a task that is too slow. `Task.shutdown/2` or `Process.exit/2` stops any process, wherever its code is.
 * Links send the stop to the child processes too.
 
-The code size is similar. Elixir can stop any work from outside. Go makes cancellation visible in each signature.
+Elixir can stop any work from outside. Go makes cancellation visible in each signature.
 
 ## Errors: same idea, different crash
 
@@ -412,11 +412,6 @@ def load_user(id) do
     {:ok, user}
   end
 end
-
-# if Db.query_user(1) returns {:error, :not_found},
-# load_user(1) returns {:error, :not_found}
-# if parse_user(row) returns :invalid_row
-# load_user(id) returns :invalid_row
 ```
 
 Unexpected errors are different.
@@ -519,7 +514,7 @@ Elixir restarts small parts of a program. Go usually restarts the whole program,
 **Go:** shared memory. One counter has a mutex, the other counter has no lock.
 
 ```elixir
-Slides.go_source("go/counter/main.go", from: "// Counter is safe")
+Slides.go_source("go/counter/main.go", from: "const (\n\tcallers")
 ```
 
 ```elixir
@@ -623,11 +618,9 @@ end
 Which nodes do `alpha` and this notebook see? `alpha` sees only the notebook. Livebook runs this notebook as a hidden node, and `Node.list/0` shows only visible nodes, so the cell uses `Node.list(:connected)`. The `livebook_…` node in the notebook's list is the Livebook server.
 
 ```elixir
-seen = fn ->
-  %{
-    alpha: :erpc.call(alpha, Node, :list, [:connected]),
-    notebook: Node.list(:connected)
-  }
+seen = fn -> 
+  [Node.self() | Node.list(:connected)] 
+  |> Map.new(&{&1, :erpc.call(&1, Node, :list, [:connected])})
 end
 
 seen.()
@@ -638,20 +631,21 @@ Connect `alpha` to `beta`, and list again. Now `alpha` sees `beta` too.
 ```elixir
 true = :erpc.call(alpha, Node, :connect, [beta])
 seen.()
+
 ```
 
 Stop `beta`.
 
 ```elixir
 :peer.stop(beta_peer)
+seen.()
 ```
 
 List again. Nobody sees `beta` now. Then stop `alpha` too.
 
 ```elixir
-nodes = seen.()
 :peer.stop(alpha_peer)
-nodes
+seen.()
 ```
 
 Elixir has clustering built in, for one trusted system. Go with gRPC is better across languages and trust boundaries.
@@ -716,12 +710,24 @@ Slides.go_source("go/snippets/sqlc.go", from: "// sqlc reads")
 <!-- livebook:{"force_markdown":true} -->
 
 ```elixir
+# pipe form
 def list_active_users(since) do
   User
   |> where([u], u.active and u.inserted_at > ^since)
   |> order_by(:name)
   |> select([:id, :name, :email])
   |> Repo.all()
+end
+
+# options/keyword form
+def list_active_users(since) do
+  query =
+    from u in User,
+      where: u.active and u.inserted_at > ^since,
+      order_by: u.name,
+      select: [:id, :name, :email]
+
+  Repo.all(query)
 end
 ```
 
@@ -747,11 +753,14 @@ defmodule Demo.User do
     timestamps()
   end
 
-  def changeset(user, attrs) do
+  def changeset(%__MODULE__{} = user, attrs) do
     user
     |> cast(attrs, [:name, :email, :active])
     |> validate_required([:name, :email])
     |> validate_format(:email, ~r/@/)
+
+    # %Ecto.Changeset{valid?: true, errors: [], data: %User{}, changes: %{...}}
+
   end
 end
 
@@ -776,6 +785,8 @@ alias Demo.{Repo, User}
 eve = %User{} |> User.changeset(%{name: "Eve", email: "eve@example.com"})
 mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
 
+IO.inspect({eve, mal})
+
 {:error, failed_step, changeset, _changes_so_far} =
   Ecto.Multi.new()
   |> Ecto.Multi.insert(:eve, eve)
@@ -787,21 +798,24 @@ mal = %User{} |> User.changeset(%{name: "Mal", email: "no email"})
 
 * The SQL Sandbox gives **each test its own transaction**, so tests that use Postgres can run with `async: true`.
 
+```elixir
+Repo.insert(eve)
+Repo.all(User)
+```
+
 ## Go types and Elixir types
 
-| Go                                     | Elixir                                                      |
-| -------------------------------------- | ----------------------------------------------------------- |
-| `int64`: wraps on overflow             | integer with no size limit: `2 ** 100` is exact             |
-| `float64`, `float32`                   | float: always 64-bit. `7 / 2` is `3.5`, `div(7, 2)` is `3`  |
-| `string`, `[]byte`                     | string (UTF-8 bytes), binary (any bytes)                    |
-| `[]T`                                  | list: a linked list, so index access is slow                |
-| multiple return values: `(value, err)` | tuple: a fixed-size value, for example `{:ok, value}`       |
-| `map[K]V`                              | map, with keys and values of any type                       |
-| `struct`                               | struct: a map with fixed keys, and no field types           |
-| `const` with `iota`                    | atoms: `:active`, `:banned`                                 |
-| `error`                                | `{:error, reason}`, or an exception for an unexpected error |
-| `nil`                                  | `nil`: an atom. `nil` and `false` are the only falsy values |
-| pointers                               | none: all data is immutable                                 |
+| Go                                     | Elixir                                                     |
+| -------------------------------------- | ---------------------------------------------------------- |
+| `int64`: wraps on overflow             | integer with no size limit: `2 ** 100` is exact            |
+| `float64`, `float32`                   | float: always 64-bit. `7 / 2` is `3.5`, `div(7, 2)` is `3` |
+| `string`, `[]byte`                     | string (UTF-8 bytes), binary (any bytes)                   |
+| `[]T`                                  | list: a linked list, so index access is slow               |
+| multiple return values: `(value, err)` | tuple: a fixed-size value, for example `{:ok, value}`      |
+| `map[K]V`                              | map, with keys and values of any type                      |
+| `struct`                               | struct: a map with fixed keys, and no field types          |
+| `const` with `iota`                    | atoms: `:active`, `:banned`                                |
+| pointers                               | none: all data is immutable                                |
 
 **Go:** a variable has a type. **Elixir:** a value has a type, and a variable can hold any value.
 
