@@ -32,6 +32,7 @@ Start Livebook from a terminal in this folder. The cells run `go`, and asdf find
 * `go/<name>/main.go`: Go programs that the slides build and run, for example `go/fanout` and `go/port`.
 * `go/snippets/*.go`: Go code that the slides only show. The `//go:build ignore` line keeps these files out of the build.
 * `slides/`: a bookmarklet that shows a Livebook notebook as a slideshow. See [slides/README.md](slides/README.md).
+* `pdf/`: scripts that build [talk.pdf](talk.pdf). See [Build the PDF](#build-the-pdf).
 
 ## Present the slides
 
@@ -47,3 +48,25 @@ For this talk:
 The slides after "Questions" are backup slides for likely questions: CPU speed, deployment, hiring and hot code upgrades. Show them only when someone asks. `End` goes to the last backup slide, not to "Questions".
 
 Some slides depend on earlier slides. "Look inside a running system" reads the workers from "Let it crash, with a supervisor". "Use both: Ports" uses the `Slides` helpers from the setup cell.
+
+## Build the PDF
+
+[talk.pdf](talk.pdf) is the notebook as one document, with the output of each cell. Git LFS keeps the PDF. Run `git lfs install` one time before you clone or pull.
+
+After you change the notebook, build the PDF again:
+
+```bash
+sh pdf/build.sh
+```
+
+The script needs the tools from `.tool-versions` and Google Chrome. Set `CHROME` to use a different Chrome or Chromium binary.
+
+1. `pdf/render.exs` runs all cells in order, outside Livebook, and writes an HTML page with the code and the outputs.
+2. Headless Chrome prints the page to `talk.pdf`. The page loads its fonts and Mermaid from a CDN, so the build needs a network connection.
+
+The PDF has these differences from the notebook in Livebook:
+
+* The setup cell is an appendix at the end.
+* The PDF does not show the `{:module, ...}` values that `defmodule` returns.
+* The `Slides.go_source` cells show only the Go listing. The `Slides.go_run` cells show the command and the output of the Go program.
+* The notebook runs as the hidden node `notebook@127.0.0.1`. Thus no Livebook server node shows in the node lists of "Many nodes, one system".
