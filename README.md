@@ -2,6 +2,8 @@
 
 This repository contains the code examples for the talk "Elixir for Gophers: Same Problems, Different Solutions".
 
+Nikola Begedin gave the talk on 27 October 2026 at [GoTalks 27.10.2026](https://www.meetup.com/golang-zg/events/317057368/), a Golang ZG meetup in Zagreb, at SD Martinovka.
+
 ## Run the slides
 
 The slides are a Livebook notebook: [talk.livemd](talk.livemd). Each section (`##` heading) is one slide. In Livebook, the notebook reads as one page. The slideshow bookmarklet shows one slide at a time (see [Present the slides](#present-the-slides)).
